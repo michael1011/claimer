@@ -1,0 +1,17 @@
+[package]
+name = "claimer"
+version = "0.1.0"
+edition = "2024"
+
+[profile.release]
+opt-level = 2
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[dependencies]
+boltz-client = { git = "https://github.com/SatoshiPortal/boltz-rust.git", version = "0.3.0" }
+clap = { version = "4.5.37", features = ["derive"] }
+
+[patch.crates-io]
+secp256k1-zkp = { git = "https://github.com/breez/rust-secp256k1-zkp.git", rev = "eac2e479255a6e32b5588bc25ee53c642fdd8395" }
