@@ -1,0 +1,70 @@
+# Dockerfile.arm64 - For cross-compiling to ARM64 Linux
+
+# Stage 1: Builder environment (runs on host architecture, e.g., amd64)
+# Use the nightly Rust image as requested for edition 2024 support
+FROM --platform=linux/amd64 rustlang/rust:nightly as builder
+
+WORKDIR /app
+
+# Install necessary dependencies for cross-compilation to aarch64-unknown-linux-gnu
+# Add arm64 architecture and install essential build tools + OpenSSL dev libraries for ARM64
+RUN dpkg --add-architecture arm64 && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    # Cross-compilers
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
+    # C library dev files for ARM64
+    libc6-dev-arm64-cross \
+    # OpenSSL dev files for ARM64 (needed for linking)
+    libssl-dev:arm64 \
+    # pkg-config helps find libraries during build
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add the ARM64 target to rustup
+RUN rustup target add aarch64-unknown-linux-gnu
+
+# Set environment variables for cross-compilation
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+    CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+    CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ \
+    # Explicitly tell pkg-config where to find ARM64 .pc files
+    PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig \
+    # Allow pkg-config to work in a cross-compilation setup
+    PKG_CONFIG_ALLOW_CROSS=1 \
+    # Tell the openssl crate build script to use system libs
+    OPENSSL_NO_VENDOR=1 \
+    CARGO_NET_RETRY=5
+
+# Copy the entire project context
+COPY . .
+
+# Build the project for the ARM64 target
+RUN cargo build --release --target aarch64-unknown-linux-gnu
+
+# Stage 2: Final runtime image (specifically for linux/arm64)
+FROM --platform=linux/arm64 debian:bookworm-slim
+
+# Install runtime dependencies for the ARM64 binary
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    # Runtime library for OpenSSL
+    libssl3 \
+    # Runtime library for PostgreSQL client
+    libpq5 \
+    # Runtime library for SQLite
+    libsqlite3-0 \
+    # Needed for HTTPS / TLS certificate verification
+    ca-certificates \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy the compiled ARM64 binary from the builder stage
+COPY --from=builder /app/target/aarch64-unknown-linux-gnu/release/claimer /usr/local/bin/claimer
+
+# Ensure the binary is executable
+RUN chmod +x /usr/local/bin/claimer
+
+# Set the default command to run the application
+CMD ["/usr/local/bin/claimer"]
